@@ -5,7 +5,7 @@ from vector_store import VectorStore
 from ai_generator import AIGenerator
 from session_manager import SessionManager
 from search_tools import ToolManager, CourseSearchTool
-from models import Course, Lesson, CourseChunk
+from models import Course
 
 class RAGSystem:
     """Main orchestrator for the Retrieval-Augmented Generation system"""
@@ -101,42 +101,85 @@ class RAGSystem:
     
     def query(self, query: str, session_id: Optional[str] = None) -> Tuple[str, List[str]]:
         """
-        Process a user query using the RAG system with tool-based search.
-        
+        Process a user query using the RAG system with automatic search.
+
         Args:
             query: User's question
             session_id: Optional session ID for conversation context
-            
+
         Returns:
-            Tuple of (response, sources list - empty for tool-based approach)
+            Tuple of (response, sources list)
         """
-        # Create prompt for the AI with clear instructions
-        prompt = f"""Answer this question about course materials: {query}"""
-        
+        # FALLBACK APPROACH: Since Phi-4 doesn't support tool calling reliably,
+        # we always search first and provide context to the AI
+
+        # Perform search automatically
+        search_results = self.vector_store.search(query=query)
+
+        # Extract sources from search results
+        sources = []
+        context_text = ""
+
+        if not search_results.is_empty() and not search_results.error:
+            # Build context from search results
+            context_parts = []
+            for doc, meta in zip(search_results.documents, search_results.metadata):
+                course_title = meta.get('course_title', 'unknown')
+                lesson_num = meta.get('lesson_number')
+
+                # Build source information
+                source_text = course_title
+                if lesson_num is not None:
+                    source_text += f" - Lesson {lesson_num}"
+
+                # Get lesson link if available
+                lesson_link = None
+                if lesson_num is not None:
+                    lesson_link = self.vector_store.get_lesson_link(course_title, lesson_num)
+
+                # Store source with link
+                source_obj = {"text": source_text}
+                if lesson_link:
+                    source_obj["link"] = lesson_link
+                sources.append(source_obj)
+
+                # Add to context
+                context_parts.append(f"[{source_text}]\n{doc}")
+
+            context_text = "\n\n".join(context_parts)
+
+
         # Get conversation history if session exists
         history = None
         if session_id:
             history = self.session_manager.get_conversation_history(session_id)
-        
-        # Generate response using AI with tools
+
+        # Create enhanced prompt with search context
+        if context_text:
+            prompt = f"""Use the following course content to answer the question. Provide a direct, concise answer without mentioning the sources or that you searched.
+
+Course Content:
+{context_text}
+
+Question: {query}"""
+        else:
+            prompt = f"""Answer this question. If it's about course materials and no relevant content was found, say so briefly.
+
+Question: {query}"""
+
+        # Generate response using AI WITHOUT tools (since Phi-4 doesn't support them reliably)
         response = self.ai_generator.generate_response(
             query=prompt,
             conversation_history=history,
-            tools=self.tool_manager.get_tool_definitions(),
-            tool_manager=self.tool_manager
+            tools=None,  # Disable tools
+            tool_manager=None
         )
-        
-        # Get sources from the search tool
-        sources = self.tool_manager.get_last_sources()
 
-        # Reset sources after retrieving them
-        self.tool_manager.reset_sources()
-        
         # Update conversation history
         if session_id:
             self.session_manager.add_exchange(session_id, query, response)
-        
-        # Return response with sources from tool searches
+
+        # Return response with sources from search
         return response, sources
     
     def get_course_analytics(self) -> Dict:

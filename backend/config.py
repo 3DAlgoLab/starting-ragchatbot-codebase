@@ -8,9 +8,9 @@ load_dotenv()
 @dataclass
 class Config:
     """Configuration settings for the RAG system"""
-    # Anthropic API settings
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    # SGLang server settings
+    SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", "http://localhost:7501/v1")
+    SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", "microsoft/Phi-4-multimodal-instruct")
     
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
